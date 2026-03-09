@@ -1,15 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { RefreshCcw, Plus, Trash2 } from "lucide-react";
 
 const days = ["Ma", "Di", "Wo", "Do", "Vr"];
 const services = ["HCK", "ADE", "OK1", "OK2", "OK4"];
-const flexServices = ["OK-FLEX 1", "OK-FLEX 2"];
 const allSkills = ["Groen", "Oranje", "Geel", "Rood"];
 
 const serviceTimes = {
@@ -18,14 +10,6 @@ const serviceTimes = {
   OK1: "08:00",
   OK2: "08:00",
   OK4: "08:00",
-};
-
-const dayDateMap = {
-  Ma: "2026-01-05",
-  Di: "2026-01-06",
-  Wo: "2026-01-07",
-  Do: "2026-01-08",
-  Vr: "2026-01-09",
 };
 
 const defaultEmployees = [
@@ -52,24 +36,42 @@ const defaultCompetencies = {
   Joelle: { HCK: "Rood", ADE: "Rood", OK1: "Groen", OK2: "Rood", OK4: "Rood" },
 };
 
+function addDays(date, amount) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function toIsoDate(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 const initialRotation = Array.from({ length: 5 }, (_, blockIndex) => {
   const blockNumber = blockIndex + 1;
-  const baseDay = 5 + blockIndex * 14;
+  const blockStart = addDays(new Date("2026-01-05T00:00:00"), blockIndex * 14);
 
-  return [1, 2].map((weekInBlock) => ({
-    id: `${blockNumber}-${weekInBlock}`,
-    block: blockNumber,
-    weekInBlock,
-    startDate: `2026-01-${String(baseDay + (weekInBlock - 1) * 7).padStart(2, "0")}`,
-    endDate: `2026-01-${String(baseDay + 4 + (weekInBlock - 1) * 7).padStart(2, "0")}`,
-    HCK: weekInBlock === 1 ? "Murphy" : "Roy",
-    ADE: weekInBlock === 1 ? "Elena" : "Gordon",
-    OK1: weekInBlock === 1 ? "Grada" : "Joelle",
-    OK2: weekInBlock === 1 ? "Roy" : "Lyon",
-    OK4: weekInBlock === 1 ? "Murphy" : "Lyon",
-    flex1: "",
-    flex2: "",
-  }));
+  return [1, 2].map((weekInBlock) => {
+    const weekStart = addDays(blockStart, (weekInBlock - 1) * 7);
+    const weekEnd = addDays(weekStart, 4);
+
+    return {
+      id: `${blockNumber}-${weekInBlock}`,
+      block: blockNumber,
+      weekInBlock,
+      startDate: toIsoDate(weekStart),
+      endDate: toIsoDate(weekEnd),
+      HCK: "",
+      ADE: "",
+      OK1: "",
+      OK2: "",
+      OK4: "",
+      flex1: "",
+      flex2: "",
+    };
+  });
 }).flat();
 
 function offSet(offCodes) {
@@ -82,23 +84,19 @@ function offSet(offCodes) {
 }
 
 function skillScore(level) {
-  // Groen moet duidelijk zwaarder wegen dan Oranje/Geel
   if (level === "Groen") return 5;
   if (level === "Oranje") return 2;
   if (level === "Geel") return 1;
-  return 0; // Rood
+  return 0;
 }
 
 function getEmployeeScore(name, competencies) {
   const row = competencies[name] || {};
-  // Som van echte competentiescores zodat Groen duidelijk prioriteit krijgt
-  return services.reduce((sum, s) => sum + skillScore(row[s]), 0);
-};
-  return services.reduce((sum, s) => sum + (skillScore(row[s]) >= 3 ? 1 : 0), 0);
+  return services.reduce((sum, service) => sum + skillScore(row[service]), 0);
 }
 
 function formatDate(dateStr) {
-  const date = new Date(dateStr);
+  const date = new Date(`${dateStr}T00:00:00`);
   if (Number.isNaN(date.getTime())) return dateStr;
   return new Intl.DateTimeFormat("nl-NL", {
     day: "2-digit",
@@ -107,21 +105,22 @@ function formatDate(dateStr) {
   }).format(date);
 }
 
-function computeFlexCandidates(row, employees, competencies, currentCounts = {}) {
-  const planned = new Set(services.map((s) => row[s]).filter(Boolean));
-  const candidates = employees
-    .filter((e) => !planned.has(e.name))
-    .map((e) => ({
-      name: e.name,
-      score: getEmployeeScore(e.name, competencies),
-      fairness: currentCounts[e.name] || 0,
-    }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.fairness !== b.fairness) return a.fairness - b.fairness;
-      return a.name.localeCompare(b.name);
-    });
-  return candidates;
+function getDayDates(startDate) {
+  const start = new Date(`${startDate}T00:00:00`);
+  return days.reduce((acc, day, index) => {
+    acc[day] = toIsoDate(addDays(start, index));
+    return acc;
+  }, {});
+}
+
+function rankCandidateForService(employee, service, competencies, currentCounts = {}) {
+  return {
+    name: employee.name,
+    skill: skillScore((competencies[employee.name] || {})[service]),
+    fairness: currentCounts[employee.name] || 0,
+    prefBonus: employee.pref === "Flexibel" ? 1 : employee.pref === serviceTimes[service] ? 1 : 0,
+    totalScore: getEmployeeScore(employee.name, competencies),
+  };
 }
 
 function pickBestEmployeeForService(service, row, employees, competencies, currentCounts = {}) {
@@ -129,16 +128,12 @@ function pickBestEmployeeForService(service, row, employees, competencies, curre
 
   const ranked = employees
     .filter((e) => !planned.has(e.name))
-    .map((e) => ({
-      name: e.name,
-      skill: skillScore((competencies[e.name] || {})[service]),
-      fairness: currentCounts[e.name] || 0,
-      prefBonus: e.pref === "Flexibel" ? 1 : e.pref === serviceTimes[service] ? 1 : 0,
-    }))
-    .filter((e) => e.skill > 0)
+    .map((e) => rankCandidateForService(e, service, competencies, currentCounts))
+    .filter((candidate) => candidate.skill > 0)
     .sort((a, b) => {
       if (b.skill !== a.skill) return b.skill - a.skill;
       if (b.prefBonus !== a.prefBonus) return b.prefBonus - a.prefBonus;
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
       if (a.fairness !== b.fairness) return a.fairness - b.fairness;
       return a.name.localeCompare(b.name);
     });
@@ -146,13 +141,34 @@ function pickBestEmployeeForService(service, row, employees, competencies, curre
   return ranked[0]?.name || "";
 }
 
+function computeFlexCandidates(row, employees, competencies, currentCounts = {}) {
+  const planned = new Set(services.map((s) => row[s]).filter(Boolean));
+
+  return employees
+    .filter((employee) => !planned.has(employee.name))
+    .map((employee) => ({
+      name: employee.name,
+      totalScore: getEmployeeScore(employee.name, competencies),
+      greenCount: services.filter((service) => (competencies[employee.name] || {})[service] === "Groen").length,
+      fairness: currentCounts[employee.name] || 0,
+    }))
+    .sort((a, b) => {
+      if (b.greenCount !== a.greenCount) return b.greenCount - a.greenCount;
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+      if (a.fairness !== b.fairness) return a.fairness - b.fairness;
+      return a.name.localeCompare(b.name);
+    });
+}
+
 function computeWeekTemplate(block, week, rotation, employees, competencies) {
-  const row = rotation.find((r) => r.block === block && Number(r.weekInBlock) === Number(week)) || rotation[0];
+  const row = rotation.find((item) => item.block === block && Number(item.weekInBlock) === Number(week)) || rotation[0];
+  const dayDates = getDayDates(row.startDate);
+
   const counts = {};
-  rotation.forEach((r) => {
-    [r.HCK, r.ADE, r.OK1, r.OK2, r.OK4, r.flex1, r.flex2].forEach((n) => {
-      if (!n) return;
-      counts[n] = (counts[n] || 0) + 1;
+  rotation.forEach((rotationRow) => {
+    [rotationRow.HCK, rotationRow.ADE, rotationRow.OK1, rotationRow.OK2, rotationRow.OK4, rotationRow.flex1, rotationRow.flex2].forEach((name) => {
+      if (!name) return;
+      counts[name] = (counts[name] || 0) + 1;
     });
   });
 
@@ -166,99 +182,87 @@ function computeWeekTemplate(block, week, rotation, employees, competencies) {
     };
 
     const plannedNames = new Set(Object.values(assignments).filter(Boolean));
-    const available = employees.filter((e) => !plannedNames.has(e.name) && !offSet(e.offCodes).has(day));
+    const available = employees.filter((employee) => !plannedNames.has(employee.name) && !offSet(employee.offCodes).has(day));
 
     const flexChoices = available
-      .map((e) => ({
-        name: e.name,
-        score: getEmployeeScore(e.name, competencies),
-        fairness: counts[e.name] || 0,
+      .map((employee) => ({
+        name: employee.name,
+        totalScore: getEmployeeScore(employee.name, competencies),
+        greenCount: services.filter((service) => (competencies[employee.name] || {})[service] === "Groen").length,
+        fairness: counts[employee.name] || 0,
       }))
       .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
+        if (b.greenCount !== a.greenCount) return b.greenCount - a.greenCount;
+        if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
         if (a.fairness !== b.fairness) return a.fairness - b.fairness;
         return a.name.localeCompare(b.name);
       });
 
     const flex = flexChoices[0]?.name || "";
-    const flex2 = flexChoices.find((c) => c.name !== flex)?.name || "";
+    const flex2 = flexChoices.find((candidate) => candidate.name !== flex)?.name || "";
 
     const replacements = services
       .map((service) => {
         const current = assignments[service];
-        const person = employees.find((e) => e.name === current);
+        const person = employees.find((employee) => employee.name === current);
         if (!person) return null;
         if (!offSet(person.offCodes).has(day)) return null;
 
         const replacementList = employees
-          .filter((e) => e.name !== current)
-          .filter((e) => !plannedNames.has(e.name))
-          .filter((e) => !offSet(e.offCodes).has(day))
-          .map((e) => ({
-            name: e.name,
-            skill: skillScore((competencies[e.name] || {})[service]),
-            fairness: counts[e.name] || 0,
-            prefBonus:
-              e.pref === "Flexibel" ? 1 : e.pref === serviceTimes[service] ? 1 : 0,
-          }))
-          .filter((e) => e.skill > 0)
+          .filter((employee) => employee.name !== current)
+          .filter((employee) => !plannedNames.has(employee.name))
+          .filter((employee) => !offSet(employee.offCodes).has(day))
+          .map((employee) => rankCandidateForService(employee, service, competencies, counts))
+          .filter((candidate) => candidate.skill > 0)
           .sort((a, b) => {
             if (b.skill !== a.skill) return b.skill - a.skill;
             if (b.prefBonus !== a.prefBonus) return b.prefBonus - a.prefBonus;
+            if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
             if (a.fairness !== b.fairness) return a.fairness - b.fairness;
             return a.name.localeCompare(b.name);
           })
           .slice(0, 3)
-          .map((e) => e.name);
+          .map((candidate) => candidate.name);
 
         return `${service}: ${current} → ${replacementList.join(" / ") || "geen match"}`;
       })
       .filter(Boolean)
       .join("\n");
 
-        const offPlannedNames = Object.values(assignments)
-      .filter(Boolean)
-      .filter((name) => {
-        const person = employees.find((e) => e.name === name);
-        return person ? offSet(person.offCodes).has(day) : false;
-      });
-
     return {
       day,
-      date: dayDateMap[day] || "",
-      week,
-      weekInBlock: row.weekInBlock,
+      date: dayDates[day],
       ...assignments,
       flex,
       flex2,
       replacements,
-      offPlannedNames,
     };
   });
 }
 
 function dashboardData(rotation, weekRows) {
   const counts = {};
-  const add = (name, key) => {
+
+  function add(name, key) {
     if (!name) return;
     if (!counts[name]) counts[name] = { "07:00": 0, "08:00": 0, FLEX: 0, totaal: 0 };
     counts[name][key] += 1;
     counts[name].totaal += 1;
-  };
+  }
 
-  rotation.forEach((r) => {
-    add(r.HCK, "07:00");
-    add(r.ADE, "07:00");
-    add(r.OK1, "08:00");
-    add(r.OK2, "08:00");
-    add(r.OK4, "08:00");
-    add(r.flex1, "FLEX");
-    add(r.flex2, "FLEX");
+  rotation.forEach((row) => {
+    add(row.HCK, "07:00");
+    add(row.ADE, "07:00");
+    add(row.OK1, "08:00");
+    add(row.OK2, "08:00");
+    add(row.OK4, "08:00");
+    add(row.flex1, "FLEX");
+    add(row.flex2, "FLEX");
   });
 
-  weekRows.forEach((r) => {
-    add(r.flex, "FLEX");
-    add(r.flex2, "FLEX");
+  weekRows.forEach((row) => {
+    add(row.flex, "FLEX");
+    add(row.flex2, "FLEX");
   });
 
   return Object.entries(counts)
@@ -266,34 +270,56 @@ function dashboardData(rotation, weekRows) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function TableInput({ value, onChange, className = "" }) {
-  return <Input value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={className} />;
+function panelStyle() {
+  return "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
+}
+
+function textInputStyle() {
+  return "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500";
+}
+
+function buttonStyle(primary = false) {
+  return primary
+    ? "rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+    : "rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50";
 }
 
 function NameCell({ name, isOff }) {
   if (!name) return <span>-</span>;
-  return <span className={isOff ? "font-medium text-red-600" : ""}>{name}</span>;
+  return <span className={isOff ? "font-semibold text-red-600" : ""}>{name}</span>;
 }
 
 export default function OkRoosterWebsite() {
+  const [activeTab, setActiveTab] = useState("weektemplate");
   const [employees, setEmployees] = useState(defaultEmployees);
   const [competencies, setCompetencies] = useState(defaultCompetencies);
-  const [rotation, setRotation] = useState(() =>
-    initialRotation.map((row) => {
-      const flex = computeFlexCandidates(row, defaultEmployees, defaultCompetencies, {})
+  const [rotation, setRotation] = useState(() => {
+    const base = initialRotation.map((row) => ({ ...row }));
+    const currentCounts = {};
+
+    return base.map((row) => {
+      const filled = { ...row };
+      services.forEach((service) => {
+        if (!filled[service]) {
+          const picked = pickBestEmployeeForService(service, filled, defaultEmployees, defaultCompetencies, currentCounts);
+          if (picked) filled[service] = picked;
+        }
+      });
+
+      const flex = computeFlexCandidates(filled, defaultEmployees, defaultCompetencies, currentCounts)
         .slice(0, 2)
-        .map((c) => c.name);
-      return { ...row, flex1: flex[0] || "", flex2: flex[1] || "" };
-    })
-  );
+        .map((candidate) => candidate.name);
+
+      filled.flex1 = flex[0] || "";
+      filled.flex2 = flex[1] || "";
+      return filled;
+    });
+  });
   const [selectedBlock, setSelectedBlock] = useState("1");
   const [selectedWeek, setSelectedWeek] = useState("1");
 
   const currentBlockRow = useMemo(
-    () =>
-      rotation.find(
-        (r) => String(r.block) === selectedBlock && String(r.weekInBlock) === selectedWeek
-      ) || rotation[0],
+    () => rotation.find((row) => String(row.block) === selectedBlock && String(row.weekInBlock) === selectedWeek) || rotation[0],
     [rotation, selectedBlock, selectedWeek]
   );
 
@@ -304,52 +330,38 @@ export default function OkRoosterWebsite() {
 
   const dashboard = useMemo(() => dashboardData(rotation, weekRows), [rotation, weekRows]);
 
-  const refreshPlanning = () => {
+  function refreshPlanning() {
     const currentCounts = {};
-
-    rotation.forEach((r) => {
-      [r.HCK, r.ADE, r.OK1, r.OK2, r.OK4, r.flex1, r.flex2].forEach((n) => {
-        if (!n) return;
-        currentCounts[n] = (currentCounts[n] || 0) + 1;
-      });
-    });
-
-    const blockKeys = Array.from(new Set(rotation.map((r) => r.block)));
+    const blockKeys = Array.from(new Set(rotation.map((row) => row.block)));
     const updated = [];
 
     blockKeys.forEach((block) => {
       const blockRows = rotation
-        .filter((r) => r.block === block)
+        .filter((row) => row.block === block)
         .sort((a, b) => Number(a.weekInBlock) - Number(b.weekInBlock));
 
-      const baseRow = { ...blockRows[0], flex1: "", flex2: "" };
+      const baseRow = {
+        ...blockRows[0],
+        HCK: "",
+        ADE: "",
+        OK1: "",
+        OK2: "",
+        OK4: "",
+        flex1: "",
+        flex2: "",
+      };
 
       services.forEach((service) => {
-        const name = baseRow[service];
-        const emp = employees.find((e) => e.name === name);
-        const skill = name ? (competencies[name] || {})[service] : "";
-
-        if (!emp || skill === "Rood" || !skill) {
-          baseRow[service] = "";
-        }
-      });
-
-      services.forEach((service) => {
-        if (!baseRow[service]) {
-          const replacement = pickBestEmployeeForService(service, baseRow, employees, competencies, currentCounts);
-          if (replacement) {
-            baseRow[service] = replacement;
-          }
-        }
-
-        if (baseRow[service]) {
-          currentCounts[baseRow[service]] = (currentCounts[baseRow[service]] || 0) + 2;
+        const picked = pickBestEmployeeForService(service, baseRow, employees, competencies, currentCounts);
+        if (picked) {
+          baseRow[service] = picked;
+          currentCounts[picked] = (currentCounts[picked] || 0) + 2;
         }
       });
 
       const flex = computeFlexCandidates(baseRow, employees, competencies, currentCounts)
         .slice(0, 2)
-        .map((c) => c.name);
+        .map((candidate) => candidate.name);
 
       baseRow.flex1 = flex[0] || "";
       baseRow.flex2 = flex[1] || "";
@@ -377,332 +389,311 @@ export default function OkRoosterWebsite() {
     });
 
     setRotation(updated);
-  };
+  }
 
-  const updateEmployee = (index, field, value) => {
-    setEmployees((prev) => prev.map((e, i) => (i === index ? { ...e, [field]: value } : e)));
-  };
+  function updateEmployee(index, field, value) {
+    setEmployees((prev) => prev.map((employee, i) => (i === index ? { ...employee, [field]: value } : employee)));
+  }
 
-  const updateRotation = (index, field, value) => {
-    setRotation((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
-  };
+  function updateRotation(index, field, value) {
+    setRotation((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  }
 
-  const updateSkill = (name, service, value) => {
+  function updateSkill(name, service, value) {
     setCompetencies((prev) => ({ ...prev, [name]: { ...(prev[name] || {}), [service]: value } }));
-  };
+  }
 
-  const addEmployee = () => {
+  function addEmployee() {
     const newName = `Nieuw${employees.length + 1}`;
     setEmployees((prev) => [...prev, { name: newName, hours: 36, pref: "Flexibel", fixedOff: "", offCodes: "" }]);
     setCompetencies((prev) => ({
       ...prev,
       [newName]: { HCK: "Geel", ADE: "Geel", OK1: "Geel", OK2: "Geel", OK4: "Geel" },
     }));
-  };
+  }
 
-  const removeEmployee = (name) => {
-    setEmployees((prev) => prev.filter((e) => e.name !== name));
+  function removeEmployee(name) {
+    setEmployees((prev) => prev.filter((employee) => employee.name !== name));
     setCompetencies((prev) => {
       const next = { ...prev };
       delete next[name];
       return next;
     });
     setRotation((prev) =>
-      prev.map((r) => ({
-        ...r,
-        HCK: r.HCK === name ? "" : r.HCK,
-        ADE: r.ADE === name ? "" : r.ADE,
-        OK1: r.OK1 === name ? "" : r.OK1,
-        OK2: r.OK2 === name ? "" : r.OK2,
-        OK4: r.OK4 === name ? "" : r.OK4,
-        flex1: r.flex1 === name ? "" : r.flex1,
-        flex2: r.flex2 === name ? "" : r.flex2,
+      prev.map((row) => ({
+        ...row,
+        HCK: row.HCK === name ? "" : row.HCK,
+        ADE: row.ADE === name ? "" : row.ADE,
+        OK1: row.OK1 === name ? "" : row.OK1,
+        OK2: row.OK2 === name ? "" : row.OK2,
+        OK4: row.OK4 === name ? "" : row.OK4,
+        flex1: row.flex1 === name ? "" : row.flex1,
+        flex2: row.flex2 === name ? "" : row.flex2,
       }))
     );
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
+    <div className="min-h-screen bg-slate-100 p-4 md:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="flex flex-col gap-4 rounded-3xl bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">OK Rooster Planner</h1>
-            <p className="mt-1 text-sm text-slate-600">
-              Website-versie van je Excel-rooster. Pas gegevens aan en klik op refresh om FLEX en weekvoorstellen opnieuw op te bouwen.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Select value={selectedBlock} onValueChange={setSelectedBlock}>
-              <SelectTrigger className="w-40 rounded-2xl">
-                <SelectValue placeholder="Blok" />
-              </SelectTrigger>
-              <SelectContent>
-                {Array.from(new Set(rotation.map((r) => r.block))).map((block) => (
-                  <SelectItem key={block} value={String(block)}>
+        <div className={panelStyle()}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-900">OK Rooster Planner</h1>
+              <p className="mt-2 text-sm text-slate-600">
+                Geschikt voor GitHub Pages. Pas medewerkers, competenties en roulatie aan en klik op refresh om het rooster opnieuw op te bouwen.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <select className={textInputStyle()} value={selectedBlock} onChange={(e) => setSelectedBlock(e.target.value)}>
+                {Array.from(new Set(rotation.map((row) => row.block))).map((block) => (
+                  <option key={block} value={String(block)}>
                     Blok {block}
-                  </SelectItem>
+                  </option>
                 ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedWeek} onValueChange={setSelectedWeek}>
-              <SelectTrigger className="w-32 rounded-2xl">
-                <SelectValue placeholder="Week" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">Week 1</SelectItem>
-                <SelectItem value="2">Week 2</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button className="rounded-2xl" onClick={refreshPlanning}>
-              <RefreshCcw className="mr-2 h-4 w-4" />
-              Refresh rooster
-            </Button>
+              </select>
+              <select className={textInputStyle()} value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)}>
+                <option value="1">Week 1</option>
+                <option value="2">Week 2</option>
+              </select>
+              <button className={buttonStyle(true)} onClick={refreshPlanning}>
+                Refresh rooster
+              </button>
+            </div>
           </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="p-5">
-              <div className="text-sm text-slate-500">Geselecteerd blok</div>
-              <div className="mt-1 text-2xl font-semibold">Blok {currentBlockRow?.block}</div>
-            </CardContent>
-          </Card>
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="p-5">
-              <div className="text-sm text-slate-500">Week van blok</div>
-              <div className="mt-1 text-2xl font-semibold">Week {selectedWeek}</div>
-            </CardContent>
-          </Card>
-          <Card className="rounded-3xl shadow-sm">
-            <CardContent className="p-5">
-              <div className="text-sm text-slate-500">Periode</div>
-              <div className="mt-1 text-lg font-semibold">
-                {formatDate(currentBlockRow?.startDate)} t/m {formatDate(currentBlockRow?.endDate)}
-              </div>
-            </CardContent>
-          </Card>
+          <div className={panelStyle()}>
+            <div className="text-sm text-slate-500">Geselecteerd blok</div>
+            <div className="mt-1 text-2xl font-semibold">Blok {currentBlockRow?.block}</div>
+          </div>
+          <div className={panelStyle()}>
+            <div className="text-sm text-slate-500">Week van blok</div>
+            <div className="mt-1 text-2xl font-semibold">Week {selectedWeek}</div>
+          </div>
+          <div className={panelStyle()}>
+            <div className="text-sm text-slate-500">Periode</div>
+            <div className="mt-1 text-lg font-semibold">
+              {formatDate(currentBlockRow?.startDate)} t/m {formatDate(currentBlockRow?.endDate)}
+            </div>
+          </div>
         </div>
 
-        <Tabs defaultValue="weektemplate" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-5 rounded-2xl bg-white p-1 shadow-sm">
-            <TabsTrigger value="weektemplate">Weektemplate</TabsTrigger>
-            <TabsTrigger value="roulatie">Roulatie</TabsTrigger>
-            <TabsTrigger value="medewerkers">Medewerkers</TabsTrigger>
-            <TabsTrigger value="competenties">Competenties</TabsTrigger>
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          </TabsList>
+        <div className="flex flex-wrap gap-2">
+          {[
+            ["weektemplate", "Weektemplate"],
+            ["roulatie", "Roulatie"],
+            ["medewerkers", "Medewerkers"],
+            ["competenties", "Competenties"],
+            ["dashboard", "Dashboard"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              className={activeTab === key ? buttonStyle(true) : buttonStyle(false)}
+              onClick={() => setActiveTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-          <TabsContent value="weektemplate">
-            <Card className="rounded-3xl shadow-sm">
-              <CardHeader>
-                <CardTitle>Weektemplate · Blok {selectedBlock} · Week {selectedWeek}</CardTitle>
-              </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="p-2">Dag</th>
-                      <th className="p-2">Datum</th>
-                      {services.map((s) => (
-                        <th key={s} className="p-2">{s}</th>
-                      ))}
-                      <th className="p-2">OK-FLEX 1</th>
-                      <th className="p-2">OK-FLEX 2</th>
-                      <th className="p-2">Invaller suggestie</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {weekRows.map((row) => (
-                      <tr key={row.day} className="border-b align-top">
-                        <td className="p-2 font-medium">{row.day}</td>
-                        <td className="p-2">{formatDate(row.date)}</td>
-                        {services.map((s) => {
-                          const person = employees.find((e) => e.name === row[s]);
-                          const isOff = person ? offSet(person.offCodes).has(row.day) : false;
-                          return (
-                            <td key={s} className="p-2">
-                              <NameCell name={row[s]} isOff={isOff} />
-                            </td>
-                          );
-                        })}
-                        <td className="p-2"><Badge variant="secondary">{row.flex || "-"}</Badge></td>
-                        <td className="p-2"><Badge variant="outline">{row.flex2 || "-"}</Badge></td>
-                        <td className="whitespace-pre-line p-2 text-slate-600">{row.replacements || "-"}</td>
-                      </tr>
+        {activeTab === "weektemplate" && (
+          <div className={panelStyle()}>
+            <h2 className="mb-4 text-xl font-semibold">Weektemplate · Blok {selectedBlock} · Week {selectedWeek}</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left">
+                    <th className="p-2">Dag</th>
+                    <th className="p-2">Datum</th>
+                    {services.map((service) => (
+                      <th key={service} className="p-2">{service}</th>
                     ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="roulatie">
-            <Card className="rounded-3xl shadow-sm">
-              <CardHeader>
-                <CardTitle>Roulatie (2 weken)</CardTitle>
-              </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="p-2">Blok</th>
-                      <th className="p-2">Week van blok</th>
-                      <th className="p-2">Van</th>
-                      <th className="p-2">Tot</th>
-                      {services.map((s) => (
-                        <th key={s} className="p-2">{s}</th>
-                      ))}
-                      {flexServices.map((s) => (
-                        <th key={s} className="p-2">{s}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rotation.map((row, index) => (
-                      <tr key={row.id} className="border-b">
-                        <td className="p-2 font-medium">{row.block}</td>
-                        <td className="p-2">
-                          <TableInput value={row.weekInBlock} onChange={(v) => updateRotation(index, "weekInBlock", v)} />
-                        </td>
-                        <td className="p-2">
-                          <TableInput value={row.startDate} onChange={(v) => updateRotation(index, "startDate", v)} />
-                        </td>
-                        <td className="p-2">
-                          <TableInput value={row.endDate} onChange={(v) => updateRotation(index, "endDate", v)} />
-                        </td>
-                        {services.map((s) => (
-                          <td key={s} className="p-2">
-                            <TableInput value={row[s]} onChange={(v) => updateRotation(index, s, v)} />
+                    <th className="p-2">OK-FLEX 1</th>
+                    <th className="p-2">OK-FLEX 2</th>
+                    <th className="p-2">Invaller suggestie</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weekRows.map((row) => (
+                    <tr key={row.day} className="border-b border-slate-100 align-top">
+                      <td className="p-2 font-medium">{row.day}</td>
+                      <td className="p-2">{formatDate(row.date)}</td>
+                      {services.map((service) => {
+                        const person = employees.find((employee) => employee.name === row[service]);
+                        const isOff = person ? offSet(person.offCodes).has(row.day) : false;
+                        return (
+                          <td key={service} className="p-2">
+                            <NameCell name={row[service]} isOff={isOff} />
                           </td>
-                        ))}
-                        <td className="p-2"><TableInput value={row.flex1} onChange={(v) => updateRotation(index, "flex1", v)} /></td>
-                        <td className="p-2"><TableInput value={row.flex2} onChange={(v) => updateRotation(index, "flex2", v)} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="mt-4 text-sm text-slate-600">Klik op <strong>Refresh rooster</strong> om OK-FLEX 1 en OK-FLEX 2 opnieuw te laten voorstellen op basis van de actuele medewerkers, competenties en ingeplande basisdiensten.</div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="medewerkers">
-            <Card className="rounded-3xl shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Medewerkers & regels</CardTitle>
-                <Button variant="outline" className="rounded-2xl" onClick={addEmployee}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Medewerker toevoegen
-                </Button>
-              </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="p-2">Naam</th>
-                      <th className="p-2">Uren</th>
-                      <th className="p-2">Voorkeur</th>
-                      <th className="p-2">Vaste vrije dag</th>
-                      <th className="p-2">Off-codes</th>
-                      <th className="p-2"></th>
+                        );
+                      })}
+                      <td className="p-2">{row.flex || "-"}</td>
+                      <td className="p-2">{row.flex2 || "-"}</td>
+                      <td className="whitespace-pre-line p-2 text-slate-600">{row.replacements || "-"}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {employees.map((emp, index) => (
-                      <tr key={emp.name} className="border-b">
-                        <td className="p-2"><TableInput value={emp.name} onChange={(v) => updateEmployee(index, "name", v)} /></td>
-                        <td className="p-2"><TableInput value={emp.hours} onChange={(v) => updateEmployee(index, "hours", v)} /></td>
-                        <td className="p-2"><TableInput value={emp.pref} onChange={(v) => updateEmployee(index, "pref", v)} /></td>
-                        <td className="p-2"><TableInput value={emp.fixedOff} onChange={(v) => updateEmployee(index, "fixedOff", v)} /></td>
-                        <td className="p-2"><TableInput value={emp.offCodes} onChange={(v) => updateEmployee(index, "offCodes", v)} /></td>
-                        <td className="p-2">
-                          <Button variant="ghost" size="icon" onClick={() => removeEmployee(emp.name)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "roulatie" && (
+          <div className={panelStyle()}>
+            <h2 className="mb-4 text-xl font-semibold">Roulatie (2 weken)</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left">
+                    <th className="p-2">Blok</th>
+                    <th className="p-2">Week van blok</th>
+                    <th className="p-2">Van</th>
+                    <th className="p-2">Tot</th>
+                    {services.map((service) => (
+                      <th key={service} className="p-2">{service}</th>
+                    ))}
+                    <th className="p-2">OK-FLEX 1</th>
+                    <th className="p-2">OK-FLEX 2</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rotation.map((row, index) => (
+                    <tr key={row.id} className="border-b border-slate-100">
+                      <td className="p-2 font-medium">{row.block}</td>
+                      <td className="p-2">
+                        <input className={textInputStyle()} value={row.weekInBlock} onChange={(e) => updateRotation(index, "weekInBlock", e.target.value)} />
+                      </td>
+                      <td className="p-2">
+                        <input className={textInputStyle()} value={row.startDate} onChange={(e) => updateRotation(index, "startDate", e.target.value)} />
+                      </td>
+                      <td className="p-2">
+                        <input className={textInputStyle()} value={row.endDate} onChange={(e) => updateRotation(index, "endDate", e.target.value)} />
+                      </td>
+                      {services.map((service) => (
+                        <td key={service} className="p-2">
+                          <input className={textInputStyle()} value={row[service]} onChange={(e) => updateRotation(index, service, e.target.value)} />
                         </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="competenties">
-            <Card className="rounded-3xl shadow-sm">
-              <CardHeader>
-                <CardTitle>Competenties</CardTitle>
-              </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="p-2">Naam</th>
-                      {services.map((s) => (
-                        <th key={s} className="p-2">{s}</th>
                       ))}
-                      <th className="p-2">Score</th>
+                      <td className="p-2">
+                        <input className={textInputStyle()} value={row.flex1} onChange={(e) => updateRotation(index, "flex1", e.target.value)} />
+                      </td>
+                      <td className="p-2">
+                        <input className={textInputStyle()} value={row.flex2} onChange={(e) => updateRotation(index, "flex2", e.target.value)} />
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {employees.map((emp) => (
-                      <tr key={emp.name} className="border-b">
-                        <td className="p-2 font-medium">{emp.name}</td>
-                        {services.map((s) => (
-                          <td key={s} className="p-2">
-                            <Select value={(competencies[emp.name] || {})[s] || "Geel"} onValueChange={(v) => updateSkill(emp.name, s, v)}>
-                              <SelectTrigger className="rounded-2xl">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {allSkills.map((skill) => (
-                                  <SelectItem key={skill} value={skill}>{skill}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </td>
-                        ))}
-                        <td className="p-2">{getEmployeeScore(emp.name, competencies)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
-          <TabsContent value="dashboard">
-            <Card className="rounded-3xl shadow-sm">
-              <CardHeader>
-                <CardTitle>Dashboard</CardTitle>
-              </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="p-2">Naam</th>
-                      <th className="p-2">07:00</th>
-                      <th className="p-2">08:00</th>
-                      <th className="p-2">FLEX</th>
-                      <th className="p-2">Totaal</th>
+        {activeTab === "medewerkers" && (
+          <div className={panelStyle()}>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">Medewerkers & regels</h2>
+              <button className={buttonStyle(false)} onClick={addEmployee}>Medewerker toevoegen</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left">
+                    <th className="p-2">Naam</th>
+                    <th className="p-2">Uren</th>
+                    <th className="p-2">Voorkeur</th>
+                    <th className="p-2">Vaste vrije dag</th>
+                    <th className="p-2">Off-codes</th>
+                    <th className="p-2">Actie</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((employee, index) => (
+                    <tr key={employee.name} className="border-b border-slate-100">
+                      <td className="p-2"><input className={textInputStyle()} value={employee.name} onChange={(e) => updateEmployee(index, "name", e.target.value)} /></td>
+                      <td className="p-2"><input className={textInputStyle()} value={employee.hours} onChange={(e) => updateEmployee(index, "hours", e.target.value)} /></td>
+                      <td className="p-2"><input className={textInputStyle()} value={employee.pref} onChange={(e) => updateEmployee(index, "pref", e.target.value)} /></td>
+                      <td className="p-2"><input className={textInputStyle()} value={employee.fixedOff} onChange={(e) => updateEmployee(index, "fixedOff", e.target.value)} /></td>
+                      <td className="p-2"><input className={textInputStyle()} value={employee.offCodes} onChange={(e) => updateEmployee(index, "offCodes", e.target.value)} /></td>
+                      <td className="p-2"><button className={buttonStyle(false)} onClick={() => removeEmployee(employee.name)}>Verwijder</button></td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {dashboard.map((row) => (
-                      <tr key={row.name} className="border-b">
-                        <td className="p-2 font-medium">{row.name}</td>
-                        <td className="p-2">{row["07:00"]}</td>
-                        <td className="p-2">{row["08:00"]}</td>
-                        <td className="p-2">{row.FLEX}</td>
-                        <td className="p-2">{row.totaal}</td>
-                      </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "competenties" && (
+          <div className={panelStyle()}>
+            <h2 className="mb-4 text-xl font-semibold">Competenties</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left">
+                    <th className="p-2">Naam</th>
+                    {services.map((service) => (
+                      <th key={service} className="p-2">{service}</th>
                     ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                    <th className="p-2">Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((employee) => (
+                    <tr key={employee.name} className="border-b border-slate-100">
+                      <td className="p-2 font-medium">{employee.name}</td>
+                      {services.map((service) => (
+                        <td key={service} className="p-2">
+                          <select
+                            className={textInputStyle()}
+                            value={(competencies[employee.name] || {})[service] || "Geel"}
+                            onChange={(e) => updateSkill(employee.name, service, e.target.value)}
+                          >
+                            {allSkills.map((skill) => (
+                              <option key={skill} value={skill}>{skill}</option>
+                            ))}
+                          </select>
+                        </td>
+                      ))}
+                      <td className="p-2">{getEmployeeScore(employee.name, competencies)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "dashboard" && (
+          <div className={panelStyle()}>
+            <h2 className="mb-4 text-xl font-semibold">Dashboard</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left">
+                    <th className="p-2">Naam</th>
+                    <th className="p-2">07:00</th>
+                    <th className="p-2">08:00</th>
+                    <th className="p-2">FLEX</th>
+                    <th className="p-2">Totaal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboard.map((row) => (
+                    <tr key={row.name} className="border-b border-slate-100">
+                      <td className="p-2 font-medium">{row.name}</td>
+                      <td className="p-2">{row["07:00"]}</td>
+                      <td className="p-2">{row["08:00"]}</td>
+                      <td className="p-2">{row.FLEX}</td>
+                      <td className="p-2">{row.totaal}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
